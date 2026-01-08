@@ -1,0 +1,144 @@
+# Azure DevOps Pipeline for Demo ASP.NET Core Solution - Staging Deployment
+# Deploys to staging/development App Services
+
+trigger:
+  branches:
+    include:
+    - develop
+    - feature/*
+
+variables:
+  buildConfiguration: 'Release'
+  dotNetVersion: '8.0.x'
+  # Staging environment variables - update these for your staging environment
+  azureServiceConnection: 'azure-service-connection'
+  stagingApiAppServiceName: 'demo-api-staging'
+  stagingWebAppServiceName: 'demo-web-staging'
+  resourceGroupName: 'demo-staging-rg'
+
+stages:
+- stage: Build
+  displayName: 'Build'
+  jobs:
+  - job: BuildSolution
+    displayName: 'Build Solution'
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET 8 SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotNetVersion)
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.sln'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build solution'
+      inputs:
+        command: 'build'
+        projects: '**/*.sln'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Demo.API'
+      inputs:
+        command: 'publish'
+        projects: '**/Demo.API/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/api --no-build'
+        publishWebProjects: false
+        zipAfterPublish: true
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Demo.Web'
+      inputs:
+        command: 'publish'
+        projects: '**/Demo.Web/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/web --no-build'
+        publishWebProjects: false
+        zipAfterPublish: true
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish artifacts'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'drop'
+
+- stage: DeployStaging
+  displayName: 'Deploy to Staging'
+  dependsOn: Build
+  jobs:
+  - deployment: DeployToStaging
+    displayName: 'Deploy to Staging Environment'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'staging'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: 'drop'
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy Demo.API to Staging'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webApp'
+              appName: $(stagingApiAppServiceName)
+              package: '$(Pipeline.Workspace)/drop/api/**/*.zip'
+              deploymentMethod: 'zipDeploy'
+
+          - task: AzureAppServiceSettings@1
+            displayName: 'Configure Staging API Settings'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appName: $(stagingApiAppServiceName)
+              resourceGroupName: $(resourceGroupName)
+              appSettings: |
+                [
+                  {
+                    "name": "ASPNETCORE_ENVIRONMENT",
+                    "value": "Staging"
+                  },
+                  {
+                    "name": "Cosmos__Endpoint",
+                    "value": "$(stagingCosmosEndpoint)"
+                  },
+                  {
+                    "name": "Cosmos__Key",
+                    "value": "$(stagingCosmosKey)"
+                  }
+                ]
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy Demo.Web to Staging'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webApp'
+              appName: $(stagingWebAppServiceName)
+              package: '$(Pipeline.Workspace)/drop/web/**/*.zip'
+              deploymentMethod: 'zipDeploy'
+
+          - task: AzureAppServiceSettings@1
+            displayName: 'Configure Staging Web Settings'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appName: $(stagingWebAppServiceName)
+              resourceGroupName: $(resourceGroupName)
+              appSettings: |
+                [
+                  {
+                    "name": "ASPNETCORE_ENVIRONMENT",
+                    "value": "Staging"
+                  },
+                  {
+                    "name": "ApiBaseUrl",
+                    "value": "https://$(stagingApiAppServiceName).azurewebsites.net"
+                  }
+                ]

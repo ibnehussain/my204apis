@@ -1,0 +1,116 @@
+@model IEnumerable<Demo.Web.Models.Item>
+@{
+    ViewData["Title"] = "Items";
+}
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="display-4">Items</h1>
+                <a href="@Url.Action("Index", "Home")" class="btn btn-outline-secondary">
+                    <i class="fas fa-home"></i> Back to Home
+                </a>
+            </div>
+
+            @if (!string.IsNullOrEmpty(ViewBag.Error))
+            {
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    @ViewBag.Error
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(ViewBag.Category))
+            {
+                <div class="alert alert-info" role="alert">
+                    <i class="fas fa-filter"></i>
+                    Showing items in category: <strong>@ViewBag.Category</strong>
+                    <a href="@Url.Action("Index")" class="ms-3 btn btn-sm btn-outline-primary">Show All</a>
+                </div>
+            }
+
+            @if (Model != null && Model.Any())
+            {
+                <div class="row">
+                    @foreach (var item in Model)
+                    {
+                        <div class="col-md-6 col-lg-4 mb-4">
+                            <div class="card h-100 shadow-sm">
+                                <div class="card-header bg-primary text-white">
+                                    <h5 class="card-title mb-0">@item.Name</h5>
+                                </div>
+                                <div class="card-body">
+                                    <p class="card-text">@item.Description</p>
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <small class="text-muted">Category:</small><br>
+                                            <span class="badge bg-secondary">@item.Category</span>
+                                        </div>
+                                        <div class="col-6">
+                                            <small class="text-muted">Price:</small><br>
+                                            <strong class="text-success">$@item.Price.ToString("F2")</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card-footer bg-light">
+                                    <small class="text-muted">
+                                        <i class="fas fa-clock"></i>
+                                        Created: @item.CreatedAt.ToString("MMM dd, yyyy")
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="alert alert-success" role="alert">
+                            <i class="fas fa-check-circle"></i>
+                            <strong>@Model.Count()</strong> items found
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5">
+                    <div class="display-1 text-muted mb-3">
+                        <i class="fas fa-inbox"></i>
+                    </div>
+                    <h3 class="text-muted">No Items Found</h3>
+                    <p class="lead text-muted">
+                        @if (!string.IsNullOrEmpty(ViewBag.Category))
+                        {
+                            <text>No items found in the "@ViewBag.Category" category.</text>
+                        }
+                        else
+                        {
+                            <text>No items are currently available. The database may be empty or there could be a connection issue.</text>
+                        }
+                    </p>
+                    @if (!string.IsNullOrEmpty(ViewBag.Category))
+                    {
+                        <a href="@Url.Action("Index")" class="btn btn-primary">
+                            <i class="fas fa-list"></i> View All Items
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Add any item-specific JavaScript here
+        $(document).ready(function() {
+            // Example: Add click tracking or other interactions
+            $('.card').hover(
+                function() { $(this).addClass('shadow-lg').removeClass('shadow-sm'); },
+                function() { $(this).addClass('shadow-sm').removeClass('shadow-lg'); }
+            );
+        });
+    </script>
+}

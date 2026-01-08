@@ -1,0 +1,239 @@
+# Azure DevOps Pipeline for Demo ASP.NET Core Solution
+# Builds and publishes Demo.API and Demo.Web projects
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    exclude:
+    - README.md
+    - '**/*.md'
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+
+variables:
+  buildConfiguration: 'Release'
+  dotNetFramework: 'net8.0'
+  dotNetVersion: '8.0.x'
+  # Azure deployment variables - update these for your environment
+  azureServiceConnection: 'azure-service-connection'  # Name of your Azure service connection
+  apiAppServiceName: 'demo-api-app'                   # Your API App Service name
+  webAppServiceName: 'demo-web-app'                   # Your Web App Service name
+  resourceGroupName: 'demo-rg'                        # Your resource group name
+
+stages:
+- stage: Build
+  displayName: 'Build and Test'
+  jobs:
+  - job: BuildSolution
+    displayName: 'Build Solution'
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    steps:
+    - checkout: self
+      displayName: 'Checkout source code'
+
+    - task: UseDotNet@2
+      displayName: 'Use .NET 8 SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotNetVersion)
+        includePreviewVersions: false
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+        feedsToUse: 'select'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build solution'
+      inputs:
+        command: 'build'
+        projects: '**/*.sln'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run tests'
+      inputs:
+        command: 'test'
+        projects: '**/*Tests*.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-build --collect:"XPlat Code Coverage"'
+        publishTestResults: true
+      continueOnError: true
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Demo.API'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: '**/Demo.API/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/api --no-build --framework $(dotNetFramework)'
+        zipAfterPublish: true
+        modifyOutputPath: false
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Demo.Web'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: '**/Demo.Web/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/web --no-build --framework $(dotNetFramework)'
+        zipAfterPublish: true
+        modifyOutputPath: false
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Demo.API Artifact'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/api'
+        artifact: 'demo-api'
+        publishLocation: 'pipeline'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Demo.Web Artifact'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/web'
+        artifact: 'demo-web'
+        publishLocation: 'pipeline'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Infrastructure'
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)'
+        artifact: 'infrastructure'
+        publishLocation: 'pipeline'
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+- stage: Deploy
+  displayName: 'Deploy to Azure'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployToAzure
+    displayName: 'Deploy to Azure App Services'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: 'demo-api'
+            displayName: 'Download Demo.API artifact'
+
+          - download: current
+            artifact: 'demo-web'
+            displayName: 'Download Demo.Web artifact'
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy Demo.API to Azure App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webApp'
+              appName: $(apiAppServiceName)
+              package: '$(Pipeline.Workspace)/demo-api/**/*.zip'
+              deploymentMethod: 'auto'
+              enableCustomDeployment: true
+              deploymentType: 'zipDeploy'
+              takeAppOfflineFlag: true
+              removeAdditionalFilesFlag: true
+              excludeFilesFromAppDataFlag: true
+
+          - task: AzureAppServiceSettings@1
+            displayName: 'Configure Demo.API App Settings'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appName: $(apiAppServiceName)
+              resourceGroupName: $(resourceGroupName)
+              appSettings: |
+                [
+                  {
+                    "name": "ASPNETCORE_ENVIRONMENT",
+                    "value": "Production"
+                  },
+                  {
+                    "name": "Cosmos__Endpoint",
+                    "value": "$(cosmosEndpoint)"
+                  },
+                  {
+                    "name": "Cosmos__Key",
+                    "value": "$(cosmosKey)"
+                  },
+                  {
+                    "name": "Cosmos__DatabaseName",
+                    "value": "demodb"
+                  },
+                  {
+                    "name": "Cosmos__ContainerName", 
+                    "value": "items"
+                  },
+                  {
+                    "name": "Cosmos__PartitionKeyPath",
+                    "value": "/category"
+                  }
+                ]
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy Demo.Web to Azure App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appType: 'webApp'
+              appName: $(webAppServiceName)
+              package: '$(Pipeline.Workspace)/demo-web/**/*.zip'
+              deploymentMethod: 'auto'
+              enableCustomDeployment: true
+              deploymentType: 'zipDeploy'
+              takeAppOfflineFlag: true
+              removeAdditionalFilesFlag: true
+              excludeFilesFromAppDataFlag: true
+
+          - task: AzureAppServiceSettings@1
+            displayName: 'Configure Demo.Web App Settings'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              appName: $(webAppServiceName)
+              resourceGroupName: $(resourceGroupName)
+              appSettings: |
+                [
+                  {
+                    "name": "ASPNETCORE_ENVIRONMENT",
+                    "value": "Production"
+                  },
+                  {
+                    "name": "ApiBaseUrl",
+                    "value": "https://$(apiAppServiceName).azurewebsites.net"
+                  }
+                ]
+
+          - task: AzureAppServiceManage@0
+            displayName: 'Restart Demo.API App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              action: 'Restart Azure App Service'
+              webAppName: $(apiAppServiceName)
+              resourceGroupName: $(resourceGroupName)
+
+          - task: AzureAppServiceManage@0
+            displayName: 'Restart Demo.Web App Service'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              action: 'Restart Azure App Service'
+              webAppName: $(webAppServiceName)
+              resourceGroupName: $(resourceGroupName)
+
+          - script: |
+              echo "Deployment completed successfully!"
+              echo "API URL: https://$(apiAppServiceName).azurewebsites.net"
+              echo "Web URL: https://$(webAppServiceName).azurewebsites.net"
+              echo "API Health Check: https://$(apiAppServiceName).azurewebsites.net/health"
+              echo "API Swagger: https://$(apiAppServiceName).azurewebsites.net/swagger"
+            displayName: 'Display Deployment Information'

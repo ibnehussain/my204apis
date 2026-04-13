@@ -1,0 +1,29 @@
+[
+  {
+    "id": "11111111-0000-0000-0000-000000000001",
+    "name": "Laptop Stand",
+    "description": "Adjustable aluminium laptop stand for ergonomic working",
+    "category": "accessories",
+    "price": 29.99,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "11111111-0000-0000-0000-000000000002",
+    "name": "Mechanical Keyboard",
+    "description": "Compact TKL mechanical keyboard with Cherry MX switches",
+    "category": "accessories",
+    "price": 89.99,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "11111111-0000-0000-0000-000000000003",
+    "name": "USB-C Hub",
+    "description": "7-in-1 USB-C hub with HDMI, USB 3.0, and card reader",
+    "category": "accessories",
+    "price": 49.99,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  }
+]

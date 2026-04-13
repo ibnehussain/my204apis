@@ -1,0 +1,23 @@
+<!--
+  APIM Policy: Rate Limiting
+  Applied at: Product or API level
+  Limits each subscription to 100 calls per 60 seconds.
+  Exceeding returns HTTP 429 Too Many Requests.
+
+  Adjust calls/renewal-period to suit your SLA.
+-->
+<policies>
+  <inbound>
+    <base />
+    <rate-limit calls="100" renewal-period="60" retry-after-header-name="Retry-After" remaining-calls-header-name="X-RateLimit-Remaining" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

@@ -1,0 +1,33 @@
+<!--
+  APIM Policy: JWT Validation
+  Applied at: API or Operation level (inbound)
+  Validates Bearer tokens issued by Azure AD before routing to backend.
+
+  Required named values in APIM:
+    - tenant-id      : Azure AD Tenant ID
+    - apim-audience  : App Registration Application (client) ID / audience URI
+-->
+<policies>
+  <inbound>
+    <base />
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: valid JWT required" require-expiration-time="true" require-scheme="Bearer">
+      <openid-config url="https://login.microsoftonline.com/{{tenant-id}}/v2.0/.well-known/openid-configuration" />
+      <audiences>
+        <audience>{{apim-audience}}</audience>
+      </audiences>
+      <issuers>
+        <issuer>https://sts.windows.net/{{tenant-id}}/</issuer>
+        <issuer>https://login.microsoftonline.com/{{tenant-id}}/v2.0</issuer>
+      </issuers>
+    </validate-jwt>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

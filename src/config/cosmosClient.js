@@ -1,17 +1,21 @@
 'use strict';
 
 const { CosmosClient } = require('@azure/cosmos');
+const { DefaultAzureCredential } = require('@azure/identity');
 
 const endpoint = process.env.COSMOS_ENDPOINT;
-const key = process.env.COSMOS_KEY;
 const databaseId = process.env.COSMOS_DATABASE_ID || 'my204db';
 const containerId = process.env.COSMOS_CONTAINER_ID || 'items';
 
-if (!endpoint || !key) {
-  throw new Error('COSMOS_ENDPOINT and COSMOS_KEY environment variables are required');
+if (!endpoint) {
+  throw new Error('COSMOS_ENDPOINT environment variable is required');
 }
 
-const client = new CosmosClient({ endpoint, key });
+// Uses Managed Identity on Azure App Service automatically.
+// Falls back to Azure CLI / VS Code credentials locally.
+const credential = new DefaultAzureCredential();
+
+const client = new CosmosClient({ endpoint, aadCredentials: credential });
 const database = client.database(databaseId);
 const container = database.container(containerId);
 

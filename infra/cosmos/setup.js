@@ -4,28 +4,31 @@
  * Cosmos DB provisioning script.
  * Creates the database and container if they don't already exist.
  *
- * Usage:
+ * Usage (Managed Identity / Azure CLI login):
  *   $env:COSMOS_ENDPOINT="https://<account>.documents.azure.com:443/"
- *   $env:COSMOS_KEY="<primary-key>"
  *   node infra/cosmos/setup.js
+ *
+ * No key required — authenticates via DefaultAzureCredential
+ * (Azure CLI locally, Managed Identity on Azure).
  */
 
 require('dotenv').config();
 
 const { CosmosClient } = require('@azure/cosmos');
+const { DefaultAzureCredential } = require('@azure/identity');
 
 const endpoint = process.env.COSMOS_ENDPOINT;
-const key = process.env.COSMOS_KEY;
 const databaseId = process.env.COSMOS_DATABASE_ID || 'my204db';
 const containerId = process.env.COSMOS_CONTAINER_ID || 'items';
 
-if (!endpoint || !key) {
-  console.error('Error: COSMOS_ENDPOINT and COSMOS_KEY must be set.');
+if (!endpoint) {
+  console.error('Error: COSMOS_ENDPOINT must be set.');
   process.exit(1);
 }
 
 async function setup() {
-  const client = new CosmosClient({ endpoint, key });
+  const credential = new DefaultAzureCredential();
+  const client = new CosmosClient({ endpoint, aadCredentials: credential });
 
   console.log(`Creating database "${databaseId}" if not exists...`);
   const { database } = await client.databases.createIfNotExists({ id: databaseId });

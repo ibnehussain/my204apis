@@ -1,5 +1,9 @@
 # my204apis
 
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
+[![Azure App Service](https://img.shields.io/badge/Azure-App%20Service-blue)](https://azure.microsoft.com/en-us/products/app-service)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A production-ready REST API built with **Node.js / Express**, deployed on **Azure App Service**, fronted by **Azure API Management (APIM)**, and backed by **Azure Cosmos DB** — fully keyless using **System-Assigned Managed Identity**.
 
 ---
@@ -148,9 +152,216 @@ Server starts at `http://localhost:3000`.
 
 ---
 
-## Deployment to Azure
+## Deployment to Azure App Service
 
-### Step 1 — Provision Azure resources
+> **Full step-by-step provisioning guide:** see [AZURE_SETUP.md](AZURE_SETUP.md)
+
+### Prerequisites
+
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) 2.60+ installed
+- An active Azure subscription
+- [Node.js](https://nodejs.org) >= 18
+
+Login and select your subscription before running any commands:
+
+```bash
+az login
+az account set --subscription "<your-subscription-id>"
+```
+
+---
+
+### Step 1 — Create a Resource Group
+
+```bash
+az group create \
+  --name rg-my204apis \
+  --location eastus
+```
+
+---
+
+### Step 2 — Create an Azure Cosmos DB Account (NoSQL)
+
+```bash
+az cosmosdb create \
+  --name cosmos-my204apis \
+  --resource-group rg-my204apis \
+  --kind GlobalDocumentDB \
+  --default-consistency-level Session \
+  --locations regionName=eastus \
+  --capabilities EnableServerless
+```
+
+Save the endpoint URL — you will need it later:
+
+```bash
+COSMOS_ENDPOINT=$(az cosmosdb show \
+  --name cosmos-my204apis \
+  --resource-group rg-my204apis \
+  --query documentEndpoint \
+  --output tsv)
+```
+
+---
+
+### Step 3 — Create an App Service Plan and Web App
+
+```bash
+# Linux B1 App Service Plan
+az appservice plan create \
+  --name plan-my204apis \
+  --resource-group rg-my204apis \
+  --sku B1 \
+  --is-linux
+
+# Node.js 20 Web App
+az webapp create \
+  --name app-my204apis \
+  --resource-group rg-my204apis \
+  --plan plan-my204apis \
+  --runtime "NODE|20-lts"
+```
+
+---
+
+### Step 4 — Enable System-Assigned Managed Identity
+
+```bash
+az webapp identity assign \
+  --name app-my204apis \
+  --resource-group rg-my204apis
+```
+
+Capture the principal ID for the next step:
+
+```bash
+PRINCIPAL_ID=$(az webapp identity show \
+  --name app-my204apis \
+  --resource-group rg-my204apis \
+  --query principalId \
+  --output tsv)
+```
+
+---
+
+### Step 5 — Grant the App Service Access to Cosmos DB
+
+Assign the **Cosmos DB Built-in Data Contributor** role — no keys required:
+
+```bash
+COSMOS_RESOURCE_ID=$(az cosmosdb show \
+  --name cosmos-my204apis \
+  --resource-group rg-my204apis \
+  --query id \
+  --output tsv)
+
+az cosmosdb sql role assignment create \
+  --account-name cosmos-my204apis \
+  --resource-group rg-my204apis \
+  --role-definition-id "00000000-0000-0000-0000-000000000002" \
+  --principal-id $PRINCIPAL_ID \
+  --scope $COSMOS_RESOURCE_ID
+```
+
+---
+
+### Step 6 — Configure App Service Environment Variables
+
+```bash
+az webapp config appsettings set \
+  --name app-my204apis \
+  --resource-group rg-my204apis \
+  --settings \
+    COSMOS_ENDPOINT=$COSMOS_ENDPOINT \
+    COSMOS_DATABASE_ID=my204db \
+    COSMOS_CONTAINER_ID=items \
+    NODE_ENV=production
+```
+
+---
+
+### Step 7 — Seed Cosmos DB
+
+The setup script uses `DefaultAzureCredential`, which picks up your local Azure CLI session. Make sure you are logged in first (`az login`), then run:
+
+```bash
+# Use the endpoint captured in Step 2
+export COSMOS_ENDPOINT=$COSMOS_ENDPOINT
+
+# Create DB + container + seed data
+node infra/cosmos/setup.js
+```
+
+---
+
+### Step 8 — Configure GitHub Secrets for CI/CD
+
+The GitHub Actions workflow uses OpenID Connect (OIDC) to authenticate to Azure — no long-lived credentials are stored. You need an **App Registration** with a federated identity credential:
+
+```bash
+# Create an app registration and capture the client ID
+APP_ID=$(az ad app create --display-name "my204apis-gh-actions" --query appId --output tsv)
+
+# Create a service principal for the app
+az ad sp create --id $APP_ID
+
+# Add a federated credential for GitHub Actions
+az ad app federated-credential create \
+  --id $APP_ID \
+  --parameters '{
+    "name": "github-oidc",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:ibnehussain/my204apis:ref:refs/heads/main",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+
+# Assign Contributor role on the subscription (or scope it to the resource group)
+az role assignment create \
+  --assignee $APP_ID \
+  --role Contributor \
+  --scope /subscriptions/$(az account show --query id --output tsv)
+```
+
+In your GitHub repository go to **Settings → Secrets and variables → Actions** and add:
+
+| Secret | Value |
+|--------|-------|
+| `AZURE_CLIENT_ID` | `$APP_ID` (app registration client ID from above) |
+| `AZURE_TENANT_ID` | `$(az account show --query tenantId --output tsv)` |
+| `AZURE_SUBSCRIPTION_ID` | `$(az account show --query id --output tsv)` |
+| `AZURE_WEBAPP_NAME` | `app-my204apis` |
+
+---
+
+### Step 9 — Deploy via GitHub Actions
+
+Push to `main` — the workflow in `.github/workflows/deploy.yml` builds and deploys automatically:
+
+```bash
+git push origin main
+```
+
+Monitor the live logs:
+
+```bash
+az webapp log tail \
+  --name app-my204apis \
+  --resource-group rg-my204apis
+```
+
+Verify the deployment:
+
+```bash
+curl https://app-my204apis.azurewebsites.net/health
+# Expected: {"status":"healthy","timestamp":"..."}
+```
+
+---
+
+### Alternative: One-Shot Provisioning Script (PowerShell)
+
+If you prefer, a single PowerShell script automates Steps 1–6:
 
 ```powershell
 .\infra\azure\provision.ps1 `
@@ -158,29 +369,6 @@ Server starts at `http://localhost:3000`.
   -AppServiceName "app-my204apis" `
   -CosmosAccount  "cosmos-my204apis" `
   -Location       "eastus"
-```
-
-This script will:
-- Create a Resource Group, App Service Plan, and Web App
-- Enable **System-Assigned Managed Identity** on the App Service
-- Assign the **Cosmos DB Built-in Data Contributor** role to the identity
-- Set `COSMOS_ENDPOINT` and other app settings — **no keys stored**
-
-### Step 2 — Add GitHub Secrets
-
-| Secret | Value |
-|--------|-------|
-| `AZURE_CLIENT_ID` | Service principal / app registration client ID |
-| `AZURE_TENANT_ID` | Azure AD Tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID |
-| `AZURE_WEBAPP_NAME` | `app-my204apis` |
-
-### Step 3 — Deploy
-
-Push to `main` — GitHub Actions deploys automatically.
-
-```powershell
-git push origin main
 ```
 
 ---
@@ -221,3 +409,18 @@ Set the following **Named Values** in APIM:
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | Enables Azure Monitor telemetry |
 
 See [`.env.example`](.env.example) for a template.
+
+---
+
+## Cleanup
+
+To delete all Azure resources when they are no longer needed:
+
+```bash
+az group delete \
+  --name rg-my204apis \
+  --yes \
+  --no-wait
+```
+
+> ⚠️ This permanently deletes all resources in the resource group.
